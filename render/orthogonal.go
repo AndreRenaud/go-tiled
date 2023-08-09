@@ -39,9 +39,9 @@ func (e *OrthogonalRendererEngine) Init(m *tiled.Map) {
 	e.m = m
 }
 
-// GetFinalImageSize returns final image size based on map data.
-func (e *OrthogonalRendererEngine) GetFinalImageSize() image.Rectangle {
-	return image.Rect(0, 0, e.m.Width*e.m.TileWidth, e.m.Height*e.m.TileHeight)
+// GetFinalImageSize returns final image size based on tile data and bounding box.
+func (e *OrthogonalRendererEngine) GetFinalImageSize(bounds Bounds) image.Rectangle {
+	return image.Rect(0, 0, bounds.limitX*e.m.TileWidth, bounds.limitY*e.m.TileHeight)
 }
 
 // RotateTileImage rotates provided tile layer.
@@ -60,8 +60,8 @@ func (e *OrthogonalRendererEngine) RotateTileImage(tile *tiled.LayerTile, img im
 	return timg
 }
 
-// GetTilePosition returns tile position in image.
-func (e *OrthogonalRendererEngine) GetTilePosition(x, y int) image.Rectangle {
+// GetTilePosition returns tile position in image. The last param (startOdd) is not needed here as the tiles don't need any indentation.
+func (e *OrthogonalRendererEngine) GetTilePosition(x, y int, _ bool) image.Rectangle {
 	return image.Rect(x*e.m.TileWidth,
 		y*e.m.TileHeight,
 		(x+1)*e.m.TileWidth,

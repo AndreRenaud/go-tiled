@@ -39,13 +39,15 @@ func (e *HexagonalRendererEngine) Init(m *tiled.Map) {
 	e.m = m
 }
 
-// GetFinalImageSize returns final image size based on map data.
-func (e *HexagonalRendererEngine) GetFinalImageSize() image.Rectangle {
+// GetFinalImageSize returns final image size based on tile data and bounding box.
+func (e *HexagonalRendererEngine) GetFinalImageSize(bounds Bounds) image.Rectangle {
 	switch e.m.StaggerAxis {
 	case tiled.AxisX:
-		return image.Rect(0, 0, e.m.Width*e.m.TileWidth, e.m.Height*e.m.TileHeight+e.m.TileHeight/2)
+		addon := (e.m.TileWidth - e.m.HexSideLength) / 2
+		return image.Rect(0, 0, bounds.limitX*(e.m.TileWidth-addon)+addon, bounds.limitY*e.m.TileHeight+e.m.TileHeight/2)
 	case tiled.AxisY:
-		return image.Rect(0, 0, e.m.Width*e.m.TileWidth+e.m.TileWidth/2, (e.m.Height+1)*e.m.TileHeight*3/4)
+		addon := (e.m.TileHeight - e.m.HexSideLength) / 2
+		return image.Rect(0, 0, bounds.limitX*e.m.TileWidth+e.m.TileWidth/2, (bounds.limitY)*(e.m.TileHeight-addon)+addon)
 	}
 	return image.Rectangle{}
 }
@@ -67,11 +69,15 @@ func (e *HexagonalRendererEngine) RotateTileImage(tile *tiled.LayerTile, img ima
 }
 
 // GetTilePosition returns tile position in image.
-func (e *HexagonalRendererEngine) GetTilePosition(x, y int) image.Rectangle {
+func (e *HexagonalRendererEngine) GetTilePosition(x, y int, startOdd bool) image.Rectangle {
+	oddCheckValue := 1
+	if startOdd {
+		oddCheckValue = 0
+	}
 	switch e.m.StaggerAxis {
 	case tiled.AxisX:
-		oddColumn := (x % 2) == 1
-		offsetWidth := e.m.TileWidth * 3 / 4
+		oddColumn := (x % 2) == oddCheckValue
+		offsetWidth := (e.m.TileWidth-e.m.HexSideLength)/2 + e.m.HexSideLength
 		yBump := 0
 		if oddColumn {
 			yBump = e.m.TileHeight / 2
@@ -81,13 +87,13 @@ func (e *HexagonalRendererEngine) GetTilePosition(x, y int) image.Rectangle {
 			x*offsetWidth+e.m.TileWidth,
 			(y+2)*e.m.TileHeight+yBump)
 	case tiled.AxisY:
-		oddRow := (y % 2) == 1
-		offsetHeight := e.m.TileHeight * 3 / 4
+		oddRow := (y % 2) == oddCheckValue
+		offsetHeight := (e.m.TileHeight-e.m.HexSideLength)/2 + e.m.HexSideLength
 		xBump := 0
 		if oddRow {
 			xBump = e.m.TileWidth / 2
 		}
-		return image.Rect(x*e.m.TileHeight+xBump,
+		return image.Rect(x*e.m.TileWidth+xBump,
 			y*offsetHeight,
 			(x+2)*e.m.TileWidth+xBump,
 			(y+1)*offsetHeight+e.m.TileHeight)
