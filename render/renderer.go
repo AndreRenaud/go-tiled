@@ -51,18 +51,46 @@ var (
 // RendererEngine is the interface implemented by objects that provide rendering engine for Tiled maps.
 type RendererEngine interface {
 	Init(m *tiled.Map)
-	GetFinalImageSize() image.Rectangle
+	GetFinalImageSize(bounds Bounds) image.Rectangle
 	RotateTileImage(tile *tiled.LayerTile, img image.Image) image.Image
-	GetTilePosition(x, y int) image.Rectangle
+	GetTilePosition(x, y int, startOdd bool) image.Rectangle
 }
 
 // Renderer represents an rendering engine.
 type Renderer struct {
-	m         *tiled.Map
-	Result    *image.NRGBA // The image result after rendering using the Render functions.
-	tileCache map[uint32]image.Image
-	engine    RendererEngine
-	fs        fs.FS
+	m            *tiled.Map
+	Result       *image.NRGBA // The image result after rendering using the Render functions.
+	ResultBounds Bounds
+	tileCache    map[uint32]image.Image
+	engine       RendererEngine
+	fs           fs.FS
+}
+
+type Bounds struct {
+	offsetX int
+	offsetY int
+	limitX  int
+	limitY  int
+}
+
+func (b *Bounds) SetLimit(x int, y int) {
+	if x >= 1 {
+		b.limitX = x
+	}
+	if y >= 1 {
+		b.limitY = y
+	}
+}
+
+func (b *Bounds) AddOffset(x int, y int) {
+	b.offsetX += x
+	if b.offsetX < 0 {
+		b.offsetX = 0
+	}
+	b.offsetY += y
+	if b.offsetY < 0 {
+		b.offsetY = 0
+	}
 }
 
 // NewRenderer creates new rendering engine instance.
@@ -75,13 +103,16 @@ func NewRendererWithFileSystem(m *tiled.Map, fs fs.FS) (*Renderer, error) {
 	r := &Renderer{m: m, tileCache: make(map[uint32]image.Image), fs: fs}
 	if r.m.Orientation == "orthogonal" {
 		r.engine = &OrthogonalRendererEngine{}
+	} else if r.m.Orientation == "hexagonal" {
+		r.engine = &HexagonalRendererEngine{}
 	} else {
 		return nil, ErrUnsupportedOrientation
 	}
 
 	r.engine.Init(r.m)
+	r.ResultBounds.limitX = r.m.Width
+	r.ResultBounds.limitY = r.m.Height
 	r.Clear()
-
 	return r, nil
 }
 
@@ -137,47 +168,57 @@ func (r *Renderer) getTileImage(tile *tiled.LayerTile) (image.Image, error) {
 	return r.engine.RotateTileImage(tile, timg), nil
 }
 
+func (r *Renderer) _renderTile(layer *tiled.Layer, i int, x int, y int, startOdd bool) error {
+	if layer.Tiles[i].IsNil() {
+		return nil
+	}
+
+	img, err := r.getTileImage(layer.Tiles[i])
+	if err != nil {
+		return err
+	}
+
+	pos := r.engine.GetTilePosition(x, y, startOdd)
+
+	if layer.Opacity < 1 {
+		mask := image.NewUniform(color.Alpha{uint8(layer.Opacity * 255)})
+
+		draw.DrawMask(r.Result, pos, img, img.Bounds().Min, mask, mask.Bounds().Min, draw.Over)
+	} else {
+		draw.Draw(r.Result, pos, img, img.Bounds().Min, draw.Over)
+	}
+
+	return nil
+}
+
 func (r *Renderer) _renderLayer(layer *tiled.Layer) error {
 
-	var xs, xe, xi, ys, ye, yi int
-	if r.m.RenderOrder == "" || r.m.RenderOrder == "right-down" {
-		xs = 0
-		xe = r.m.Width
-		xi = 1
-		ys = 0
-		ye = r.m.Height
-		yi = 1
+	var xs, xe, ys, ye int
+	if (r.m.Orientation == "hexagonal" || r.m.Orientation == "orthogonal") && r.m.RenderOrder == "right-down" {
+		xs = r.ResultBounds.offsetX
+		xe = r.ResultBounds.offsetX + r.ResultBounds.limitX
+		if xe > r.m.Width {
+			xe = r.m.Width
+		}
+		ys = r.ResultBounds.offsetY
+		ye = r.ResultBounds.offsetY + r.ResultBounds.limitY
+		if ye > r.m.Height {
+			ye = r.m.Height
+		}
 	} else {
 		return ErrUnsupportedRenderOrder
 	}
-
-	i := 0
-	for y := ys; y*yi < ye; y = y + yi {
-		for x := xs; x*xi < xe; x = x + xi {
-			if layer.Tiles[i].IsNil() {
-				i++
-				continue
-			}
-
-			img, err := r.getTileImage(layer.Tiles[i])
-			if err != nil {
+	cnt := 0
+	startOdd := r.ResultBounds.offsetY%2 == 1
+	for y := ys; y < ye; y++ {
+		for x := xs; x < xe; x++ {
+			cnt++
+			i := y*r.m.Width + x
+			if err := r._renderTile(layer, i, x-xs, y-ys, startOdd); err != nil {
 				return err
 			}
-
-			pos := r.engine.GetTilePosition(x, y)
-
-			if layer.Opacity < 1 {
-				mask := image.NewUniform(color.Alpha{uint8(layer.Opacity * 255)})
-
-				draw.DrawMask(r.Result, pos, img, img.Bounds().Min, mask, mask.Bounds().Min, draw.Over)
-			} else {
-				draw.Draw(r.Result, pos, img, img.Bounds().Min, draw.Over)
-			}
-
-			i++
 		}
 	}
-
 	return nil
 }
 
@@ -221,7 +262,7 @@ func (r *Renderer) RenderVisibleLayers() error {
 // render a layer, make a copy of the render, clear the renderer, and repeat for each
 // layer in the Map.
 func (r *Renderer) Clear() {
-	r.Result = image.NewNRGBA(r.engine.GetFinalImageSize())
+	r.Result = image.NewNRGBA(r.engine.GetFinalImageSize(r.ResultBounds))
 }
 
 // SaveAsPng writes rendered layers as PNG image to provided writer.
